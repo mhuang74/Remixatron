@@ -1,14 +1,14 @@
-# Use the official Python 3.7 image as the base image
-FROM python:3.7
+FROM python:3.12
 
 # Install the required system packages
 RUN apt-get update
-RUN apt-get install -y ffmpeg git cmake libdbus-1-dev libgirepository1.0-dev
+RUN apt-get install -y ffmpeg git cmake libdbus-1-dev libgirepository1.0-dev gfortran libopenblas-dev
 RUN apt-get clean
 
 # Install pip dependencies
 RUN pip install --upgrade pip
-RUN pip install --upgrade yt-dlp cython numpy
+RUN pip install --upgrade yt-dlp cython Cython numpy
+RUN pip install git+https://github.com/CPJKU/madmom
 
 # Create a working directory
 WORKDIR /app

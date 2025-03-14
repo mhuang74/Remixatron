@@ -16,7 +16,7 @@ eventlet
 ffmpeg-python
 Flask
 Flask-Compress
-Flask-SocketIO
+Flask-SocketIO>=5.0.0
 greenlet
 idna
 itsdangerous
@@ -37,7 +37,7 @@ pycryptodomex
 PyGObject
 pyparsing
 python-engineio
-python-socketio
+python-socketio>=5.0.0
 pyxattr
 requests
 #resampy==0.2.2

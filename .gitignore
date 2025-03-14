@@ -1,0 +1,34 @@
+# Ignore compiled Python bytecode files
+*.pyc
+*.pyo
+
+# Ignore Python cache directories
+#__pycache__/
+
+**/__pycache__/
+**/__pycache__/*.pyc
+**/*.pyc
+**/*.pyo
+
+# Ignore environment-specific settings
+.env
+
+# Ignore editor-specific files
+.vscode/
+.idea/
+.sublime-text/
+
+# Ignore virtual environment directories
+venv/
+env/
+
+# Ignore build and distribution directories
+build/
+dist/
+
+# Ignore audio files
+*.mp3
+*.wav
+
+# Ignore numpy cache
+*.npy
