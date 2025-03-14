@@ -33,6 +33,7 @@ be signaled when the processing is complete. The default mode is to run synchron
 
 import collections
 import librosa
+import madmom
 import math
 import random
 import scipy
@@ -125,7 +126,7 @@ class InfiniteJukebox(object):
     """
 
     def __init__(self, filename, start_beat=1, clusters=0, progress_callback=None,
-                 do_async=False, use_v1=False):
+                 do_async=False, use_v1=False, starting_beat_cache=None):
 
         """ The constructor for the class. Also starts the processing thread.
 
@@ -154,6 +155,7 @@ class InfiniteJukebox(object):
         self.clusters = clusters
         self._extra_diag = ""
         self._use_v1 = use_v1
+        self._starting_beat_cache = starting_beat_cache
 
         if do_async == True:
             self.play_ready = threading.Event()
@@ -162,6 +164,38 @@ class InfiniteJukebox(object):
         else:
             self.play_ready = None
             self.__process_audio()
+
+    def symmetrize_matrix(self, Rf):
+        """
+        Symmetrizes a square matrix Rf by averaging its off-diagonal elements.
+
+        Args:
+            Rf (numpy.ndarray): The input square matrix.
+
+        Returns:
+            numpy.ndarray: A symmetric version of the input matrix.
+        """
+        # Get the dimensions of the input matrix
+        n_rows, n_cols = Rf.shape
+
+        # Ensure the matrix is square
+        if n_rows != n_cols:
+            raise ValueError("Input matrix must be square for symmetrization.")
+
+        # Create a new array to store the symmetric matrix
+        Rf_symmetric = np.zeros_like(Rf, dtype=Rf.dtype)
+
+        # Iterate through the upper triangle of the matrix (including the diagonal)
+        for i in range(n_rows):
+            for j in range(i, n_cols):
+                # Calculate the average of Rf[i, j] and Rf[j, i]
+                average_value = (Rf[i, j] + Rf[j, i]) / 2
+
+                # Set both Rf_symmetric[i, j] and Rf_symmetric[j, i] to the average
+                Rf_symmetric[i, j] = average_value
+                Rf_symmetric[j, i] = average_value
+
+        return Rf_symmetric
 
     def __process_audio(self):
 
@@ -180,14 +214,13 @@ class InfiniteJukebox(object):
         self.__report_progress( .1, "loading file and extracting raw audio")
 
         #
-        # load the file as stereo with a high sample rate and
-        # trim the silences from each end
+        # load the file as stereo with a sample rate of 44,100 Hz to match MADOM expectations
+        # also trim the silences from each end
         #
-
-        y, sr = librosa.core.load(self.__filename, mono=False, sr=None)
+        y, sr = librosa.load(self.__filename, mono=False, sr=44100)
         y, _ = librosa.effects.trim(y)
 
-        self.duration = librosa.core.get_duration(y,sr)
+        self.duration = librosa.get_duration(y=y,sr=sr)
         self.raw_audio = (y * np.iinfo(np.int16).max).astype(np.int16).T.copy(order='C')
         self.sample_rate = sr
 
@@ -206,15 +239,50 @@ class InfiniteJukebox(object):
         cqt = librosa.cqt(y=y, sr=sr, bins_per_octave=BINS_PER_OCTAVE, n_bins=N_OCTAVES * BINS_PER_OCTAVE)
         C = librosa.amplitude_to_db( np.abs(cqt), ref=np.max)
 
-        self.__report_progress( .3, "Finding beats..." )
-
         ##########################################################
         # To reduce dimensionality, we'll beat-synchronous the CQT
-        tempo, btz = librosa.beat.beat_track(y=y, sr=sr, trim=False)
+
+        # tempo, btz = librosa.beat.beat_track(y=y, sr=sr, trim=False)
+
+        ### START MADMOM: Use MADMOM for beat detection instead of librosa
+
+        # if we didn't pass in a beat cache then we'll need to do downbeat
+        # detection via madmom
+
+        downbeats = []
+
+        if self._starting_beat_cache.size == 0:
+    
+            self.__report_progress( .3, "Running a high precision beat finding algorithm. This could take up to 2 minutes..." )
+    
+            proc = madmom.features.DBNDownBeatTrackingProcessor(beats_per_bar=[3, 4], fps=100)
+            act = madmom.features.RNNDownBeatProcessor()(y)
+            downbeats = proc(act)
+
+            # write downbeat cache
+            beats_cache_filename = self.__filename + '.npy'
+            try:
+                np.save(beats_cache_filename, downbeats)
+            except Exception as e:
+                print(f"Warning: Failed to write downbeat cache to {beats_cache_filename}. Error: {e}")
+
+        else:
+            # the rest of this code expects downbeats to be a 2d numpy array of
+            # [beat_time_in_sec, bar_position]
+
+           self.__report_progress( .3, "Using local beat cache for this file..." )
+           downbeats = self._starting_beat_cache
+
+
+        btz = librosa.time_to_frames(downbeats[:,0], sr=sr)
+
+        ### END MADMOM
+
         # tempo, btz = librosa.beat.beat_track(y=y, sr=sr)
         Csync = librosa.util.sync(C, btz, aggregate=np.median)
 
-        self.tempo = tempo
+        # self.tempo = tempo[0]
+        self.tempo = librosa.feature.tempo(y=y, sr=sr)[0]
 
         # For alignment purposes, we'll need the timing of the beats
         # we fix_frames to include non-beat frames 0 and C.shape[1] (final frame)
@@ -234,8 +302,10 @@ class InfiniteJukebox(object):
 
         # Enhance diagonals with a median filter (Equation 2)
         df = librosa.segment.timelag_filter(scipy.ndimage.median_filter)
-        Rf = df(R, size=(1, 7))
+        R_smoothed = df(R, size=(1, 7))
 
+        # ensure real eigenvectors from Laplacian by forcing Rf back into symmetry
+        Rf = self.symmetrize_matrix(R_smoothed)
 
         ###################################################################
         # Now let's build the sequence matrix (S_loc) using mfcc-similarity
@@ -264,14 +334,40 @@ class InfiniteJukebox(object):
 
         A = mu * Rf + (1 - mu) * R_path
 
+        print(f"Dimensions of combined matrix A: {A.shape}")
+
         #####################################################
         # Now let's compute the normalized Laplacian (Eq. 10)
-        L = scipy.sparse.csgraph.laplacian(A, normed=True)
+        L_orig = scipy.sparse.csgraph.laplacian(A, normed=True)
+        # make sure L is contiguous
+        L = np.ascontiguousarray(L_orig)
 
+        # ### HACK: ensure L is contiguous to avoid seg fault with eig()
+        # # Save matrix L to disk
+        # np.save('laplacian_matrix.npy', L_orig)
+        # # Load matrix L back from disk
+        # L = np.load('laplacian_matrix.npy')
+
+        # # Verify that the loaded matrix is the same as the original
+        # if np.array_equal(L, L_orig):
+        #     print("Matrix L successfully saved and loaded.")
+        # else:
+        #     print("Warning: Loaded matrix L does not match the original.")
+
+        # ### END Hack
+
+        print(f"Dimensions of matrix Laplacian: {L.shape}")
+
+        # to use eigh(), matrix should be symmetrix and hermitian
+        is_hermitian = np.allclose(L, L.T.conj())
 
         # and its spectral decomposition
-        _, evecs = scipy.linalg.eigh(L)
-
+        if is_hermitian:
+            print("Calc eigenvectors for Hermitian Laplacian")
+            _, evecs = scipy.linalg.eigh(L)
+        else:
+            raise ValueError("Matrix L is not Hermitian. Cannot compute eigenvectors using scipy.linalg.eigh.")
+            return
 
         # We can clean this up further with a median filter.
         # This can help smooth over small discontinuities

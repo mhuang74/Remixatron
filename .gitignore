@@ -32,3 +32,6 @@ dist/
 
 # Ignore numpy cache
 *.npy
+
+# Ignore madmom
+**/madmom/

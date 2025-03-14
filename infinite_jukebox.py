@@ -7,13 +7,8 @@ work.
 """
 
 import argparse
-import curses
-import curses.textpad
 import numpy as np
 import os
-import pygame
-import pygame.event
-import pygame.locals
 import signal
 import soundfile as sf
 import sys
@@ -22,7 +17,7 @@ import time
 from Remixatron import InfiniteJukebox
 from pygame import mixer
 
-SOUND_FINISHED = pygame.locals.USEREVENT + 1
+# SOUND_FINISHED = pygame.locals.USEREVENT + 1
 
 def process_args():
 
@@ -66,12 +61,13 @@ def MyCallback(pct_complete, message):
         Example: [######    ] Doing some thing...
     """
 
-    progress_bar = " [" + "".ljust(int(pct_complete * 10),'#') + "".ljust(10 - int(pct_complete * 10), ' ') + "] "
-    log_line =  progress_bar + message
+    # progress_bar = " [" + "".ljust(int(pct_complete * 10),'#') + "".ljust(10 - int(pct_complete * 10), ' ') + "] "
+    # log_line =  progress_bar + message
 
-    window.clear()
-    window.addstr(1,0,log_line)
-    window.refresh()
+    # window.clear()
+    # window.addstr(1,0,log_line)
+    # window.refresh()
+    print(f"[{pct_complete}]: {message}")
 
 
 def display_playback_progress(v):
@@ -239,6 +235,7 @@ def save_to_file(jukebox, label, duration):
     sf.write(label + '.wav', output_bytes, jukebox.sample_rate, format='WAV', subtype='PCM_24')
 
 
+
 if __name__ == "__main__":
 
     # store the original SIGINT handler and install a new handler
@@ -253,18 +250,31 @@ if __name__ == "__main__":
 
     args = process_args()
 
-    curses.setupterm()
+    # curses.setupterm()
 
-    window = curses.initscr()
-    curses.curs_set(0)
+    # window = curses.initscr()
+    # curses.curs_set(0)
+
+    # load cached beats since MADMOM takes a while
+    beats_cache_filename = args.filename + '.npy'
+    cached_beats = np.array([])
+
+    try:
+        cached_beats = np.load(beats_cache_filename)
+    except FileNotFoundError:
+        print(f"No beats cache file found: '{beats_cache_filename}'")
+    except Exception as e:
+        print(f"Warning: An error occurred while opening the file '{beats_cache_filename}': {e}")
 
     # do the clustering. Run synchronously. Post status messages to MyCallback()
     jukebox = InfiniteJukebox(filename=args.filename, start_beat=args.start, clusters=args.clusters,
-                                progress_callback=MyCallback, do_async=False, use_v1=args.use_v1)
+                                progress_callback=MyCallback, do_async=False, use_v1=args.use_v1,
+                                starting_beat_cache=cached_beats)
 
     # show more info about what was found
-    window.addstr(2,0, get_verbose_info())
-    window.refresh()
+    print(get_verbose_info())
+    # window.addstr(2,0, get_verbose_info())
+    # window.refresh()
 
     # if we're just saving the remix to a file, then just
     # find the necessarry beats and do that
@@ -273,47 +283,49 @@ if __name__ == "__main__":
         save_to_file(jukebox, args.save, args.duration)
         graceful_exit(0, 0)
 
-    # it's important to make sure the mixer is setup with the
-    # same sample rate as the audio. Otherwise the playback will
-    # sound too slow/fast/awful
+    # # it's important to make sure the mixer is setup with the
+    # # same sample rate as the audio. Otherwise the playback will
+    # # sound too slow/fast/awful
 
-    mixer.init(frequency=jukebox.sample_rate)
-    channel = mixer.Channel(0)
+    # mixer.init(frequency=jukebox.sample_rate)
+    # channel = mixer.Channel(0)
 
-    # pygame's event handling functions won't work unless the
-    # display module has been initialized -- even though we
-    # won't be making any display calls.
+    # # pygame's event handling functions won't work unless the
+    # # display module has been initialized -- even though we
+    # # won't be making any display calls.
 
-    pygame.display.init()
+    # pygame.display.init()
 
-    # register the event type we want fired when a sound buffer
-    # finishes playing
+    # # register the event type we want fired when a sound buffer
+    # # finishes playing
 
-    channel.set_endevent(SOUND_FINISHED)
+    # channel.set_endevent(SOUND_FINISHED)
 
-    # queue and start playing the first event in the play vector. This is basic
-    # audio double buffering that will reduce choppy audio from impercise timings. The
-    # goal is to always have one beat in queue to play as soon as the last one is done.
+    # # queue and start playing the first event in the play vector. This is basic
+    # # audio double buffering that will reduce choppy audio from impercise timings. The
+    # # goal is to always have one beat in queue to play as soon as the last one is done.
 
-    beat_to_play = jukebox.beats[ jukebox.play_vector[0]['beat'] ]
+    # beat_to_play = jukebox.beats[ jukebox.play_vector[0]['beat'] ]
 
-    snd = mixer.Sound(buffer=beat_to_play['buffer'])
-    channel.queue(snd)
+    # snd = mixer.Sound(buffer=beat_to_play['buffer'])
+    # channel.queue(snd)
 
-    display_playback_progress(jukebox.play_vector[0])
+    # display_playback_progress(jukebox.play_vector[0])
 
-    # go through the rest of  the playback list, start playing each beat, display
-    # the progress and wait for the playback to complete. Playback happens on another
-    # thread in the pygame library, so we have to wait to be signaled to queue another
-    # event.
+    # # go through the rest of  the playback list, start playing each beat, display
+    # # the progress and wait for the playback to complete. Playback happens on another
+    # # thread in the pygame library, so we have to wait to be signaled to queue another
+    # # event.
 
-    for v in jukebox.play_vector[1:]:
+    # for v in jukebox.play_vector[1:]:
 
-        beat_to_play = jukebox.beats[ v['beat'] ]
+    #     beat_to_play = jukebox.beats[ v['beat'] ]
 
-        snd = mixer.Sound(buffer=beat_to_play['buffer'])
-        channel.queue(snd)
+    #     snd = mixer.Sound(buffer=beat_to_play['buffer'])
+    #     channel.queue(snd)
 
-        pygame.event.wait()
+    #     pygame.event.wait()
 
-        display_playback_progress(v)
+    #     display_playback_progress(v)
+
+    print("Cannot play audio via docker. Existing.")
