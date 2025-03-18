@@ -618,9 +618,21 @@ def get_audio():
         flask.Response: the audio file to play
     """
 
-    # input_file = tempfile.gettempdir() + '/' + get_userid() + '.wav'
-    input_file = tempfile.gettempdir() + '/' + get_userid() + '.tmp.wav'
-    output_file = tempfile.gettempdir() + '/' + get_userid() + '.mp3'
+    print("get_audio called")
+
+    userid = get_userid()
+    temp_dir = tempfile.gettempdir()
+    
+    # Try possible input filenames
+    input_file = temp_dir + '/' + userid + '.tmp'  # YouTube download
+    if not os.path.exists(input_file):
+        print(f"Audio file not found: {input_file}")
+        input_file = temp_dir + '/' + userid + '.ogg'  # Uploaded file
+        if not os.path.exists(input_file):
+            print(f"Audio file still not found: {input_file}. Giving up.")
+            return "Audio file not found", 500
+
+    output_file = temp_dir + '/' + userid + '.mp3'
 
     cmd = ['ffmpeg', '-i', input_file, '-b:a', '192K', output_file]
 
@@ -628,7 +640,7 @@ def get_audio():
 
     subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-    return send_from_directory(tempfile.gettempdir() + '/', get_userid() + '.mp3')
+    return send_from_directory(temp_dir, get_userid() + '.mp3')
 
 @app.route('/trackinfo')
 def get_trackinfo():
@@ -842,7 +854,7 @@ def upload_audio():
 
     # save the uploaded file
 
-    of = tempfile.gettempdir() + '/' +deviceid + '.tmp'
+    of = tempfile.gettempdir() + '/' + deviceid + '.tmp'
     file.save(of)
 
     print( deviceid + ' uploaded: ' + file.filename )
